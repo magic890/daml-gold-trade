@@ -1,0 +1,163 @@
+module Main where
+
+import Daml.Script
+
+
+type AssetId = ContractId Asset
+type AssetPledgeProposalId = ContractId AssetPledgeProposal
+
+-- data DataChoice assetId assetPledgeProposalId = AssetId assetId | AssetPledgeProposalId assetPledgeProposalId
+
+template Asset
+  with
+    issuer: Party
+    owner: Party
+    name: Text
+    value: Decimal
+  where
+    ensure 
+      name /= "" && value > 0.0
+    signatory issuer, owner -- Who can archive (destroy) the contract
+    observer issuer, owner -- Who can see the contract
+
+    choice PledgeAssetTo : AssetPledgeProposalId -- Choice return data type (last line of do block)
+      with -- Input params
+        newOwner: Party 
+      controller owner -- Who can exercise this choice
+      do
+        create AssetPledgeProposal with ..
+          
+
+
+template AssetPledgeProposal
+  with 
+    issuer: Party
+    owner: Party
+    newOwner: Party
+    name: Text
+    value: Decimal
+    -- assetId: AssetId
+  where
+    signatory issuer, owner
+    observer issuer, owner, newOwner
+
+    choice Accept: AssetId
+      controller newOwner
+      do 
+        -- archive assetId
+        create Asset with owner = newOwner, ..
+
+    choice Reject: AssetId
+      controller newOwner, owner
+      do create Asset with ..
+
+
+
+-- -- Track chain of pledges
+-- template AssetPledged with
+--     pledgedBy       : Party
+--     interest        : Decimal
+--     expirationDays  : Decimal
+--     autoRenwal      : Bool
+--     signedOn        : Date
+--     asset           : Party
+--     owner           : Party
+--   where
+--     -- TODO: ensure constraints
+--     signatory owner
+--     observer owner, pledgedBy -- Both parties can see the contract  
+    
+--     choice Pledge : AssetPledgedId
+--       with
+--         newPledgedTo      : Party
+--         newInterest       : Decimal
+--         newExpirationDays : Decimal
+--         newAutoRenewal     : Bool
+--         newSignedOn       : Date
+--       controller owner
+--       do
+--         archive self
+--         create AssetPledged with
+--           pledgedBy = owner
+--           interest = newInterest
+--           expirationDays = newExpirationDays
+--           autoRenwal = newAutoRenewal
+--           signedOn = newSignedOn
+--           owner = newPledgedTo
+--           asset = asset
+
+--     -- Only current owner can revoke the last pledge.
+--     choice RevokePledge : AssetPledgedId
+--       with 
+--         assetPledgedCid : AssetPledgedId
+--         userRevokingThePledge   : Party
+--       controller owner, pledgedBy
+--       do 
+--         assetPledgedId <- fetch assetPledgedCid
+--         -- exercise asset Give
+--         --   with newOwner = owner !! 1 -- 2nd position owner in list
+--         archive self
+--         create AssetPledged with
+--           pledgedBy = assetPledgedId.pledgedBy
+--           interest = assetPledgedId.interest
+--           expirationDays = assetPledgedId.expirationDays
+--           autoRenwal = assetPledgedId.autoRenwal
+--           signedOn = assetPledgedId.signedOn
+--           owner = assetPledgedId.pledgedBy
+--           asset = assetPledgedId.asset
+
+
+--setup : Script AssetPledgedId
+
+
+setup : Script ()
+setup = script do
+
+-- user_setup_begin
+  alice <- allocatePartyWithHint "Alice" (PartyIdHint "Alice")
+  bob <- allocatePartyWithHint "Bob" (PartyIdHint "Bob")
+  aliceId <- validateUserId "alice"
+  bobId <- validateUserId "bob"
+  createUser (User aliceId (Some alice)) [CanActAs alice]
+  createUser (User bobId (Some bob)) [CanActAs bob]
+-- user_setup_end
+
+  aliceGold1 <- submit alice do
+    createCmd Asset with
+      issuer = alice
+      owner = alice
+      name = "Gold Bar 1oz"
+      value = 1800.00
+
+  aliceGold2 <- submit alice do
+    createCmd Asset with
+      issuer = alice
+      owner = alice
+      name = "Gold Bar 2oz"
+      value = 3600.00
+
+  bobGold1 <- submit bob do
+    createCmd Asset with
+      issuer = bob
+      owner = bob
+      name = "Gold Bar 0.5kg"
+      value = 27000.00
+
+  alicePledgeGold1ToBob1 <- submit alice do 
+    exerciseCmd aliceGold1 PledgeAssetTo with 
+      newOwner = bob
+
+  alicePledgeGold1ToBob1Accept <-
+    submit bob do exerciseCmd alicePledgeGold1ToBob1 Accept
+
+  -- alicePledgeToBob1 <- submit alice do
+  --   createCmd AssetPledged with
+  --     pledgedBy = alice
+  --     interest = 5
+  --     expirationDays = 1
+  --     autoRenwal = False
+  --     signedOn  = date 2022 Dec 29
+  --     asset = aliceGold1
+  --     owner = bob
+
+  pure()
