@@ -2,147 +2,110 @@ module Main where
 
 import Daml.Script
 import DA.Text as T
--- import DA.Optional
-
--- data DataChoice assetId assetPledgeProposalId = AssetId assetId | AssetPledgeProposalId assetPledgeProposalId
-
+import DA.List
+import DA.Optional
 
 
+-- getCurrentOwner: 
+--   returns the head of the list of people that have the pledge of the asset (i.e. the current owner), 
+--      or in case of no pledge, the issuer of the asset (i.e. the rightful owner).
+getCurrentOwner : [Party] -> Party -> Party
+getCurrentOwner [] issuer = issuer
+getCurrentOwner [x] issuer = x
+getCurrentOwner [x, _] issuer = x
+getCurrentOwner x issuer = getCurrentOwner x issuer
+
+
+-- Shorthand notation for returned data type inside Update instructions (i.e. Choice return)
 type AssetId = ContractId Asset
 type AssetPledgeProposalId = ContractId AssetPledgeProposal
 
 
+-- Asset
+--   Holds information about the asset.
 template Asset
   with
-    -- issuer: Optional(Party)
-    issuer: Party
-    owner: Party
-    name: Text
-    value: Decimal
-    currency: Text
+    issuer: Party -- Rightful owner
+    pledgedTo: [Party] -- Chain of custody in case of pledging. The head is the current owner
+    name: Text -- Asset description
+    value: Decimal -- Nominal value
+    currency: Text -- Nominal value currency
   where
-    signatory issuer, owner -- Who can archive (destroy) the contract
-    observer issuer, owner -- Who can see the contract
+    signatory issuer -- Who can archive (destroy) the contract
+    observer issuer, pledgedTo -- Who can see the contract
 
     ensure
       name /= ""
       && value > 0.0
       && T.isUpper currency
+      && unique pledgedTo -- Not possible to pledge twice to the same person
+
+    let currentOwner = getCurrentOwner pledgedTo issuer
 
     choice PledgeAssetTo : AssetPledgeProposalId -- Choice return data type (last line of do block)
       with -- Input params
-        newOwner: Party 
-      controller owner -- Who can exercise this choice
+        newPledgedTo: Party 
+      controller currentOwner -- Who can exercise this choice
       do
-        assertMsg "You can't pledge your asset to yourself." (owner /= newOwner)
+        -- assert (newPledgedTo `elem` [issuer, getHead pledgedTo])
+        assertMsg "You can't pledge the asset to the issuer." (issuer /= newPledgedTo)
+        assertMsg "Pledgers can't pledge the asset back to themself." (isNone (elemIndex newPledgedTo pledgedTo))
         create AssetPledgeProposal with ..
     
     choice ReturnAsset : AssetId
-      controller owner
+      controller currentOwner
       do
-        assertMsg "You can't return an asset that you own to yourself." (owner /= issuer)
-        create Asset with owner = issuer, ..
+        -- assertMsg "You can't return an asset that you own to yourself." (pledgedTo /= issuer)
+        assertMsg "You can't return an asset that you own to yourself." (currentOwner /= issuer)
+        create Asset with pledgedTo = tail pledgedTo, ..
 
 
 template AssetPledgeProposal
   with 
     -- issuer: Optional(Party)
     issuer: Party
-    owner: Party
-    newOwner: Party
+    pledgedTo: [Party]
+    newPledgedTo: Party
     name: Text
     value: Decimal
     currency: Text
   where
-    signatory issuer, owner
-    observer issuer, owner, newOwner
+    signatory issuer, pledgedTo
+    observer issuer, pledgedTo, newPledgedTo
 
     -- TODO: ensure
 
     choice Accept: AssetId
-      controller newOwner
+      controller newPledgedTo
       do 
-        create Asset with owner = newOwner, ..
+        create Asset with pledgedTo = newPledgedTo :: pledgedTo, ..
 
     choice Reject: AssetId
-      controller newOwner, owner
+      controller newPledgedTo, pledgedTo
       do create Asset with ..
 
 
-
--- -- Track chain of pledges
--- template AssetPledged with
---     pledgedBy       : Party
---     interest        : Decimal
---     expirationDays  : Decimal
---     autoRenwal      : Bool
---     signedOn        : Date
---     asset           : Party
---     owner           : Party
---   where
---     -- TODO: ensure constraints
---     signatory owner
---     observer owner, pledgedBy -- Both parties can see the contract  
-    
---     choice Pledge : AssetPledgedId
---       with
---         newPledgedTo      : Party
---         newInterest       : Decimal
---         newExpirationDays : Decimal
---         newAutoRenewal     : Bool
---         newSignedOn       : Date
---       controller owner
---       do
---         archive self
---         create AssetPledged with
---           pledgedBy = owner
---           interest = newInterest
---           expirationDays = newExpirationDays
---           autoRenwal = newAutoRenewal
---           signedOn = newSignedOn
---           owner = newPledgedTo
---           asset = asset
-
---     -- Only current owner can revoke the last pledge.
---     choice RevokePledge : AssetPledgedId
---       with 
---         assetPledgedCid : AssetPledgedId
---         userRevokingThePledge   : Party
---       controller owner, pledgedBy
---       do 
---         assetPledgedId <- fetch assetPledgedCid
---         -- exercise asset Give
---         --   with newOwner = owner !! 1 -- 2nd position owner in list
---         archive self
---         create AssetPledged with
---           pledgedBy = assetPledgedId.pledgedBy
---           interest = assetPledgedId.interest
---           expirationDays = assetPledgedId.expirationDays
---           autoRenwal = assetPledgedId.autoRenwal
---           signedOn = assetPledgedId.signedOn
---           owner = assetPledgedId.pledgedBy
---           asset = assetPledgedId.asset
-
-
---setup : Script AssetPledgedId
 
 
 setup : Script ()
 setup = script do
 
--- user_setup_begin
+  -- User creation
   alice <- allocatePartyWithHint "Alice" (PartyIdHint "Alice")
   bob <- allocatePartyWithHint "Bob" (PartyIdHint "Bob")
+  robert <- allocatePartyWithHint "Robert" (PartyIdHint "Robert")
   aliceId <- validateUserId "alice"
   bobId <- validateUserId "bob"
+  robertId <- validateUserId "robert"
   createUser (User aliceId (Some alice)) [CanActAs alice]
   createUser (User bobId (Some bob)) [CanActAs bob]
--- user_setup_end
+  createUser (User robertId (Some robert)) [CanActAs robert]
 
+  -- Asset creation
   aliceGold1 <- submit alice do
     createCmd Asset with
       issuer = alice
-      owner = alice
+      pledgedTo = []
       name = "Gold Bar 1oz"
       value = 1800.00
       currency = "CHF"
@@ -150,7 +113,7 @@ setup = script do
   aliceGold2 <- submit alice do
     createCmd Asset with
       issuer = alice
-      owner = alice
+      pledgedTo = []
       name = "Gold Bar 2oz"
       value = 3600.00
       currency = "CHF"
@@ -158,32 +121,54 @@ setup = script do
   bobGold1 <- submit bob do
     createCmd Asset with
       issuer = bob
-      owner = bob
+      pledgedTo = []
       name = "Gold Bar 0.5kg"
       value = 27000.00
       currency = "CHF"
 
-  alicePledgeGold1ToBob1 <- submit alice do 
+  -- Workflow start
+  
+  -- Alice returns asset to Alice
+  --   --> Trigger error: Alice can't return an asset to herself, she already owns it.
+  submitMustFail alice do
+    exerciseCmd aliceGold1 ReturnAsset
+
+  -- Alice pledges to Bob
+  aliceGold1 <- submit alice do 
     exerciseCmd aliceGold1 PledgeAssetTo with 
-      newOwner = bob
+      newPledgedTo = bob
 
-  alicePledgeGold1ToBob1Accept <-
-    submit bob do exerciseCmd alicePledgeGold1ToBob1 Accept
+  -- Bob accepts pledge
+  aliceGold1 <- submit bob do 
+    exerciseCmd aliceGold1 Accept
 
-  bobReturn1Oz <-
-    submit bob do exerciseCmd alicePledgeGold1ToBob1Accept ReturnAsset
+  -- Bob tries to pledge back to Alice 
+  --   -> Trigger error: Bob can't pledge the asset to the issuer. He can return it.
+  submitMustFail bob do
+    exerciseCmd aliceGold1 PledgeAssetTo with
+      newPledgedTo = alice
 
-  -- aliceReturn1Oz <-
-  --   submit alice do exerciseCmd bobReturn1Oz ReturnAsset
+  -- Bob pledges to Robert
+  aliceGold1 <- submit bob do
+    exerciseCmd aliceGold1 PledgeAssetTo with
+      newPledgedTo = robert
 
-  -- alicePledgeToBob1 <- submit alice do
-  --   createCmd AssetPledged with
-  --     pledgedBy = alice
-  --     interest = 5
-  --     expirationDays = 1
-  --     autoRenwal = False
-  --     signedOn  = date 2022 Dec 29
-  --     asset = aliceGold1
-  --     owner = bob
+  -- Robert accepts pledge
+  aliceGold1 <- submit robert do 
+    exerciseCmd aliceGold1 Accept
 
+  -- Bob tries to return the asset to Alice while pledged to Robert 
+  --   -> Trigger error: Robert should return before to Bob
+  submitMustFail bob do
+    exerciseCmd aliceGold1 ReturnAsset
+
+  -- Robert returns asset to Bob
+  aliceGold1 <- submit robert do
+    exerciseCmd aliceGold1 ReturnAsset
+
+  -- Bob returns asset to Alice
+  aliceGold1 <- submit bob do
+    exerciseCmd aliceGold1 ReturnAsset
+
+  
   pure()
