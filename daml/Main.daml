@@ -3,6 +3,7 @@ module Main where
 import Daml.Script
 import DA.Text as T
 import DA.List
+import DA.Date as D
 import DA.Optional
 
 
@@ -27,6 +28,8 @@ template Asset
   with
     issuer: Party -- Rightful owner
     pledgedTo: [Party] -- Chain of custody in case of pledging. The head is the current owner
+    pledgedInDate: [Date]
+    pledgedBearingInterest: [Decimal]
     name: Text -- Asset description
     value: Decimal -- Nominal value
     currency: Text -- Nominal value currency
@@ -42,47 +45,73 @@ template Asset
 
     let currentOwner = getCurrentOwner pledgedTo issuer
 
-    choice PledgeAssetTo : AssetPledgeProposalId -- Choice return data type (last line of do block)
+    choice PledgeAssetTo: AssetPledgeProposalId -- Choice return data type (last line of do block)
       with -- Input params
-        newPledgedTo: Party 
+        proposalReceiver: Party
+        proposalDate: Date
+        proposalBearingInterest: Decimal
+        
       controller currentOwner -- Who can exercise this choice
       do
-        -- assert (newPledgedTo `elem` [issuer, getHead pledgedTo])
-        assertMsg "You can't pledge the asset to the issuer." (issuer /= newPledgedTo)
-        assertMsg "Pledgers can't pledge the asset back to themself." (isNone (elemIndex newPledgedTo pledgedTo))
-        create AssetPledgeProposal with ..
+        assertMsg "You can't pledge the asset to the issuer." (issuer /= proposalReceiver)
+        assertMsg "Pledgers can't pledge the asset back to themself." (isNone (elemIndex proposalReceiver pledgedTo))
+        create AssetPledgeProposal with 
+          ..
     
-    choice ReturnAsset : AssetId
+    choice ReturnAsset: AssetId
+      with
+        date: Date -- TODO: Use this date to calculate interest earnings
       controller currentOwner
       do
-        -- assertMsg "You can't return an asset that you own to yourself." (pledgedTo /= issuer)
         assertMsg "You can't return an asset that you own to yourself." (currentOwner /= issuer)
-        create Asset with pledgedTo = tail pledgedTo, ..
+        
+        -- TODO: create InterestEarned template
+        
+        create Asset with 
+          pledgedTo = tail pledgedTo
+          pledgedInDate = tail pledgedInDate
+          pledgedBearingInterest = tail pledgedBearingInterest
+          ..
 
 
 template AssetPledgeProposal
   with 
-    -- issuer: Optional(Party)
     issuer: Party
     pledgedTo: [Party]
-    newPledgedTo: Party
+    pledgedInDate: [Date]
+    pledgedBearingInterest: [Decimal]
     name: Text
     value: Decimal
     currency: Text
+    proposalReceiver: Party
+    proposalDate: Date
+    proposalBearingInterest: Decimal
   where
-    signatory issuer, pledgedTo
-    observer issuer, pledgedTo, newPledgedTo
+    signatory issuer, pledgedTo -- TODO: only the currentOwner?
+    observer issuer, pledgedTo, proposalReceiver
 
     -- TODO: ensure
 
+    let currentOwner = getCurrentOwner pledgedTo issuer
+
     choice Accept: AssetId
-      controller newPledgedTo
+      with
+        date: Date
+      controller proposalReceiver
       do 
-        create Asset with pledgedTo = newPledgedTo :: pledgedTo, ..
+        create Asset with 
+          pledgedTo = proposalReceiver :: pledgedTo
+          pledgedInDate = proposalDate :: pledgedInDate
+          pledgedBearingInterest = proposalBearingInterest :: pledgedBearingInterest
+          ..
 
     choice Reject: AssetId
-      controller newPledgedTo, pledgedTo
-      do create Asset with ..
+      with
+        date: Date
+      controller proposalReceiver, currentOwner
+      do 
+        create Asset with 
+          ..
 
 
 
@@ -106,6 +135,8 @@ setup = script do
     createCmd Asset with
       issuer = alice
       pledgedTo = []
+      pledgedInDate = []
+      pledgedBearingInterest = []
       name = "Gold Bar 1oz"
       value = 1800.00
       currency = "CHF"
@@ -114,6 +145,8 @@ setup = script do
     createCmd Asset with
       issuer = alice
       pledgedTo = []
+      pledgedInDate = []
+      pledgedBearingInterest = []
       name = "Gold Bar 2oz"
       value = 3600.00
       currency = "CHF"
@@ -122,53 +155,79 @@ setup = script do
     createCmd Asset with
       issuer = bob
       pledgedTo = []
+      pledgedInDate = []
+      pledgedBearingInterest = []
       name = "Gold Bar 0.5kg"
       value = 27000.00
       currency = "CHF"
 
   -- Workflow start
   
+  -- Set ledger time
+  let date1: Date = D.date 2023 Jan 4
+
   -- Alice returns asset to Alice
   --   --> Trigger error: Alice can't return an asset to herself, she already owns it.
   submitMustFail alice do
-    exerciseCmd aliceGold1 ReturnAsset
+    exerciseCmd aliceGold1 ReturnAsset with
+      date = date1
 
   -- Alice pledges to Bob
   aliceGold1 <- submit alice do 
     exerciseCmd aliceGold1 PledgeAssetTo with 
-      newPledgedTo = bob
+      proposalReceiver = bob
+      proposalDate = date1
+      proposalBearingInterest = 0.02
 
   -- Bob accepts pledge
   aliceGold1 <- submit bob do 
-    exerciseCmd aliceGold1 Accept
+    exerciseCmd aliceGold1 Accept with 
+      date = date1
+
+  -- TODO: test archive of Alice to fail
+  -- submitMustFail alice do archiveCmd aliceGold1
+
+  -- Time travel in future after N days
+  let date2: Date = addDays date1 365
 
   -- Bob tries to pledge back to Alice 
   --   -> Trigger error: Bob can't pledge the asset to the issuer. He can return it.
   submitMustFail bob do
     exerciseCmd aliceGold1 PledgeAssetTo with
-      newPledgedTo = alice
+      proposalReceiver = alice
+      proposalDate = date2
+      proposalBearingInterest = 0.15
 
   -- Bob pledges to Robert
   aliceGold1 <- submit bob do
     exerciseCmd aliceGold1 PledgeAssetTo with
-      newPledgedTo = robert
+      proposalReceiver = robert
+      proposalDate = date2
+      proposalBearingInterest = 0.05
 
   -- Robert accepts pledge
   aliceGold1 <- submit robert do 
-    exerciseCmd aliceGold1 Accept
+    exerciseCmd aliceGold1 Accept with 
+      date = date2
 
   -- Bob tries to return the asset to Alice while pledged to Robert 
   --   -> Trigger error: Robert should return before to Bob
   submitMustFail bob do
-    exerciseCmd aliceGold1 ReturnAsset
+    exerciseCmd aliceGold1 ReturnAsset with
+      date = date2
+
+  -- Time travel in future after N days
+  let date3: Date = addDays date2 365
 
   -- Robert returns asset to Bob
   aliceGold1 <- submit robert do
-    exerciseCmd aliceGold1 ReturnAsset
+    exerciseCmd aliceGold1 ReturnAsset with
+      date = date3
 
   -- Bob returns asset to Alice
   aliceGold1 <- submit bob do
-    exerciseCmd aliceGold1 ReturnAsset
+    exerciseCmd aliceGold1 ReturnAsset with
+      date = date3
 
   
   pure()
