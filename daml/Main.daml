@@ -8,7 +8,7 @@ import DA.Optional
 
 
 -- getCurrentOwner: 
---   returns the head of the list of people that have the pledge of the asset (i.e. the current owner), 
+--   Returns the head of the list of people that have the pledge of the asset (i.e. the current owner),
 --      or in case of no pledge, the issuer of the asset (i.e. the rightful owner).
 getCurrentOwner : [Party] -> Party -> Party
 getCurrentOwner [] issuer = issuer
@@ -60,13 +60,25 @@ template Asset
     
     choice ReturnAsset: AssetId
       with
-        date: Date -- TODO: Use this date to calculate interest earnings
+        date: Date
       controller currentOwner
       do
         assertMsg "You can't return an asset that you own to yourself." (currentOwner /= issuer)
         
-        -- TODO: create InterestEarned template
+        let interestPeriod: Decimal = 365.0
+        let daysAccruedInterest: Int = subDate date (head pledgedInDate)
+        let interestRate: Decimal = head pledgedBearingInterest
+        -- Simple Interest = Principal * Rate * Time
+        let interestEarned: Decimal = value * interestRate * intToDecimal daysAccruedInterest / interestPeriod
+
+        let previousOwner = getCurrentOwner (tail pledgedTo) issuer
         
+        create Payment with
+          sender = currentOwner
+          receiver = previousOwner
+          value = interestEarned
+          ..
+
         create Asset with 
           pledgedTo = tail pledgedTo
           pledgedInDate = tail pledgedInDate
@@ -87,10 +99,14 @@ template AssetPledgeProposal
     proposalDate: Date
     proposalBearingInterest: Decimal
   where
-    signatory issuer, pledgedTo -- TODO: only the currentOwner?
+    signatory issuer, pledgedTo
     observer issuer, pledgedTo, proposalReceiver
 
-    -- TODO: ensure
+    ensure
+      name /= ""
+      && value > 0.0
+      && T.isUpper currency
+      && unique pledgedTo
 
     let currentOwner = getCurrentOwner pledgedTo issuer
 
@@ -112,6 +128,21 @@ template AssetPledgeProposal
       do 
         create Asset with 
           ..
+
+
+template Payment
+  with
+    date: Date
+    sender: Party
+    receiver: Party
+    value: Decimal
+    currency: Text
+  where
+    signatory sender
+    observer sender, receiver
+
+    ensure 
+      T.isUpper currency
 
 
 
@@ -184,9 +215,6 @@ setup = script do
     exerciseCmd aliceGold1 Accept with 
       date = date1
 
-  -- TODO: test archive of Alice to fail
-  -- submitMustFail alice do archiveCmd aliceGold1
-
   -- Time travel in future after N days
   let date2: Date = addDays date1 365
 
@@ -228,6 +256,28 @@ setup = script do
   aliceGold1 <- submit bob do
     exerciseCmd aliceGold1 ReturnAsset with
       date = date3
+
+  -- Bob pledges to Robert
+  bobGold1 <- submit bob do
+    exerciseCmd bobGold1 PledgeAssetTo with
+      proposalReceiver = robert
+      proposalDate = date3
+      proposalBearingInterest = 0.04
+
+  -- Robert accepts pledge
+  bobGold1 <- submit robert do
+    exerciseCmd bobGold1 Accept with
+      date = date3
+
+  -- Time travel in future after N days
+  let date4: Date = addDays date3 7
+
+  -- Robert pledges to Alice
+  bobGold1 <- submit robert do
+    exerciseCmd bobGold1 PledgeAssetTo with
+      proposalReceiver = alice
+      proposalDate = date4
+      proposalBearingInterest = 0.07
 
   
   pure()
