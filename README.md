@@ -43,7 +43,7 @@ The custody chain and pledges history in the `Asset` enable all the partecipants
 
 | Attribute | Description |
 |---|---|
-| ... | `Asset` details. |
+| `asset: Asset` | Asset details. |
 | `proposalReceiver: Party` | Targeted partecipants for the asset pledge. |
 | `proposalDate: Date` | Proposed beginning of the pledge. |
 | `proposalBearingInterest: Decimal` | Proposed interest rate for the pledge. |
