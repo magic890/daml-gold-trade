@@ -53,7 +53,7 @@ The custody chain and pledges history in the `Asset` enable all the partecipants
 | Attribute | Description |
 |---|---|
 | `date: Date` | Date of the payment. |
-| `sender: Party` | Participant sending the payment. Usually the lender paying the interest matured to the previous asset custodian. |
+| `sender: Party` | Participant sending the payment.<br>Usually the lender paying the interest matured to the previous asset custodian. |
 | `receiver: Party` | Participant receiving the payment. |
 | `value: Decimal` | Nominal value of the payment. |
 | `currency: Text` | Currency of the nominal value. |
