@@ -1,6 +1,6 @@
 # DAML Gold Trade / Asset Pledging - Use Case
 
-In Middle East gold trade and pledging of gold assets in order gain profit is a popular practice. Raw gold, buillions and jewellery are pledged to a counterparty (i.e., lender) which in exchange will provide an interest payment.
+In Middle East gold trade and pledging of gold assets in order gain profit is a popular practice. Raw gold, buillions and money are pledged to a counterparty (i.e., lender) which in exchange will provide an interest payment.
 
 The lender will work with the asset in custody, gaining his own profit. As an example, a lender might pledge an asset to a shop to sold on the market with a markup.
 
