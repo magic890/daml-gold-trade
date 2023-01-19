@@ -11,13 +11,13 @@ setup = script do
   -- User creation
   alice <- allocatePartyWithHint "Alice" (PartyIdHint "Alice")
   bob <- allocatePartyWithHint "Bob" (PartyIdHint "Bob")
-  robert <- allocatePartyWithHint "Robert" (PartyIdHint "Robert")
+  charlie <- allocatePartyWithHint "Charlie" (PartyIdHint "Charlie")
   aliceId <- validateUserId "alice"
   bobId <- validateUserId "bob"
-  robertId <- validateUserId "robert"
+  charlieId <- validateUserId "charlie"
   createUser (User aliceId (Some alice)) [CanActAs alice]
   createUser (User bobId (Some bob)) [CanActAs bob]
-  createUser (User robertId (Some robert)) [CanActAs robert]
+  createUser (User charlieId (Some charlie)) [CanActAs charlie]
 
   -- Asset creation
   aliceGold1 <- submit alice do
@@ -84,20 +84,30 @@ setup = script do
       proposalDate = date2
       proposalBearingInterest = 0.15
 
-  -- Bob pledges to Robert
+  -- Bob pledges to Charlie
   aliceGold1 <- submit bob do
     exerciseCmd aliceGold1 PledgeAssetTo with
-      proposalReceiver = robert
+      proposalReceiver = charlie
       proposalDate = date2
       proposalBearingInterest = 0.05
 
-  -- Robert accepts pledge
-  aliceGold1 <- submit robert do 
+  -- Charlie accepts pledge
+  aliceGold1 <- submit charlie do 
     exerciseCmd aliceGold1 Accept with 
       date = date2
 
-  -- Bob tries to return the asset to Alice while pledged to Robert 
-  --   -> Trigger error: Robert should return before to Bob
+  -- Alice tries to archive her gold
+  --   --> Trigger error: Alice can't archive because her asset is pledged and she is not the owner.
+  submitMustFail alice do
+     archiveCmd aliceGold1
+
+  -- Bob tries to archive her gold
+  --   --> Trigger error: Bob can't archive because he is not the issuer of the asset and it is pledged.
+  submitMustFail bob do
+     archiveCmd aliceGold1
+
+  -- Bob tries to return the asset to Alice while pledged to Charlie 
+  --   -> Trigger error: Charlie should return before to Bob
   submitMustFail bob do
     exerciseCmd aliceGold1 ReturnAsset with
       date = date2
@@ -105,8 +115,8 @@ setup = script do
   -- Time travel in future after N days
   let date3: Date = addDays date2 365
 
-  -- Robert returns asset to Bob
-  aliceGold1 <- submit robert do
+  -- Charlie returns asset to Bob
+  aliceGold1 <- submit charlie do
     exerciseCmd aliceGold1 ReturnAsset with
       date = date3
 
@@ -115,23 +125,23 @@ setup = script do
     exerciseCmd aliceGold1 ReturnAsset with
       date = date3
 
-  -- Bob pledges to Robert
+  -- Bob pledges to Charlie
   bobGold1 <- submit bob do
     exerciseCmd bobGold1 PledgeAssetTo with
-      proposalReceiver = robert
+      proposalReceiver = charlie
       proposalDate = date3
       proposalBearingInterest = 0.04
 
-  -- Robert accepts pledge
-  bobGold1 <- submit robert do
+  -- Charlie accepts pledge
+  bobGold1 <- submit charlie do
     exerciseCmd bobGold1 Accept with
       date = date3
 
   -- Time travel in future after N days
   let date4: Date = addDays date3 7
 
-  -- Robert pledges to Alice
-  bobGold1 <- submit robert do
+  -- Charlie pledges to Alice
+  bobGold1 <- submit charlie do
     exerciseCmd bobGold1 PledgeAssetTo with
       proposalReceiver = alice
       proposalDate = date4

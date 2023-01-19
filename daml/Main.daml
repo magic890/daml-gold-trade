@@ -33,8 +33,7 @@ template Asset
     value: Decimal -- Nominal value
     currency: Text -- Nominal value currency
   where
-    signatory issuer -- Who can archive (destroy) the contract
-    observer issuer, pledgedTo -- Who can see the contract
+    signatory issuer, pledgedTo -- Who can archive (destroy) the contract
 
     ensure
       name /= ""
@@ -94,7 +93,7 @@ template AssetPledgeProposal
     proposalBearingInterest: Decimal
   where
     signatory asset.issuer, asset.pledgedTo
-    observer asset.issuer, asset.pledgedTo, proposalReceiver
+    observer proposalReceiver
 
     let currentOwner = getCurrentOwner asset.pledgedTo asset.issuer
 
@@ -129,7 +128,7 @@ template Payment
     currency: Text
   where
     signatory sender
-    observer sender, receiver
+    observer receiver
 
     ensure 
       T.isUpper currency
